@@ -1,18 +1,20 @@
 """
-LangGraph Marketing Agent - Task 2: Critique & Refine Loop
+LangGraph Marketing Agent by Carlos Matías Sáez 
+GitHub: https://github.com/cmatiass
 
 This module implements a marketing agent with self-correction capabilities:
 1. Researches a topic (placeholder function with mock data)
 2. Creates a draft marketing post based on the research
 3. Critiques the draft post for improvements
 4. Refines the post based on critiques (iterative loop)
+5. Seeks human approval for the final post
 
-The agent uses LangGraph's StateGraph with conditional edges for the refinement loop.
 """
 
 import os
 from typing import TypedDict, List, Dict, Any, Literal
 from typing_extensions import Annotated
+from datetime import datetime
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, START, END
@@ -25,7 +27,7 @@ load_dotenv()
 
 class AgentState(TypedDict):
     """
-    State management for the marketing agent with critique & refine loop.
+    State management for the marketing agent with critique & refine loop and human approval.
     
     Attributes:
         initial_request: The original user request for the marketing content
@@ -34,6 +36,8 @@ class AgentState(TypedDict):
         critiques: List of critiques for improving the draft post
         iteration_count: Number of refinement iterations completed
         max_iterations: Maximum number of refinement iterations allowed
+        human_approved: Boolean indicating if the post has been approved by a human
+        approval_attempts: Number of times human approval has been requested
         messages: Chat history for the conversation
     """
     initial_request: str
@@ -42,6 +46,8 @@ class AgentState(TypedDict):
     critiques: List[str]
     iteration_count: int
     max_iterations: int
+    human_approved: bool
+    approval_attempts: int
     messages: Annotated[List[HumanMessage], add_messages]
 
 def research_node(state: AgentState) -> AgentState:
@@ -169,6 +175,11 @@ def copywriting_node(state: AgentState) -> AgentState:
     else:
         # Refinement prompt
         current_draft = state["draft_post"]
+        
+        # Check if we have human feedback vs AI critiques
+        has_human_feedback = any("Human feedback:" in critique for critique in critiques)
+        feedback_type = "HUMAN FEEDBACK" if has_human_feedback else "AI CRITIQUES"
+        
         copywriter_prompt = f"""
         You are an expert marketing copywriter refining a marketing post. 
         
@@ -177,7 +188,7 @@ def copywriting_node(state: AgentState) -> AgentState:
         CURRENT DRAFT:
         {current_draft}
         
-        CRITIQUES TO ADDRESS:
+        {feedback_type} TO ADDRESS:
         {chr(10).join('• ' + critique for critique in critiques)}
         
         RESEARCH CONTEXT:
@@ -185,16 +196,19 @@ def copywriting_node(state: AgentState) -> AgentState:
         Success Criteria: {', '.join(research['success_criteria'])}
         Target Audience: {research['audience_demographics']['age_range']} year-olds on {', '.join(research['audience_demographics']['platforms'])}
         
-        Please revise the marketing post to address all the critiques while maintaining its strengths. 
+        IMPORTANT: {"This is direct feedback from a human reviewer. Please follow their specific instructions carefully and prioritize their requirements above all else." if has_human_feedback else "These are AI-generated critiques for improvement."}
+        
+        Please revise the marketing post to address all the feedback while maintaining its strengths. 
         Ensure the refined version:
-        1. Addresses each specific critique mentioned above
+        1. Addresses each specific point mentioned above {"(especially the human feedback)" if has_human_feedback else ""}
         2. Maintains the overall marketing effectiveness
         3. Stays true to the original request
         4. Follows best practices for the target platforms
         
         Generate the refined marketing post:
         """
-        print(f"🔄 Refining marketing post (iteration {iteration_count + 1})...")
+        feedback_source = "human feedback" if has_human_feedback else f"AI critiques"
+        print(f"🔄 Refining marketing post based on {feedback_source} (iteration {iteration_count + 1})...")
     
     # Generate the marketing post
     messages = [
@@ -314,39 +328,145 @@ def critic_node(state: AgentState) -> AgentState:
         "critiques": critiques
     }
 
-def should_continue(state: AgentState) -> Literal["copywriting", "END"]:
+def human_approval_node(state: AgentState) -> AgentState:
     """
-    Conditional edge function that determines whether to continue refining or finish.
+    Human approval node that requests human review and approval of the draft post.
+    
+    This node presents the finalized draft post to a human reviewer and waits
+    for their approval or rejection decision.
     
     Args:
-        state: Current agent state with critiques
+        state: Current agent state with draft post ready for human review
         
     Returns:
-        "copywriting" if refinement needed, "END" if post is ready
+        Updated state with human approval status
+    """
+    draft_post = state["draft_post"]
+    initial_request = state["initial_request"]
+    iteration_count = state["iteration_count"]
+    approval_attempts = state.get("approval_attempts", 0)
+    
+    print("\n" + "=" * 60)
+    print("👤 HUMAN APPROVAL REQUIRED")
+    print("=" * 60)
+    
+    print(f"\n📝 Original Request: {initial_request}")
+    print(f"🔄 Refinement Iterations Completed: {iteration_count}")
+    print(f"👥 Approval Attempt: {approval_attempts + 1}")
+    
+    print(f"\n📋 DRAFT POST FOR REVIEW:")
+    print("-" * 40)
+    print(draft_post)
+    print("-" * 40)
+    
+    # Human approval loop
+    while True:
+        try:
+            approval = input("\n👤 Do you approve this marketing post? [y/n/feedback]: ").strip().lower()
+            
+            if approval in ['y', 'yes']:
+                print("✅ Post approved by human reviewer!")
+                return {
+                    **state,
+                    "human_approved": True,
+                    "approval_attempts": approval_attempts + 1
+                }
+            
+            elif approval in ['n', 'no']:
+                print("❌ Post rejected by human reviewer.")
+                print("🔄 Returning to critique & refine loop for improvements...")
+                return {
+                    **state,
+                    "human_approved": False,
+                    "approval_attempts": approval_attempts + 1,
+                    "critiques": ["Human reviewer requested improvements to the overall post quality and effectiveness."],
+                    "iteration_count": 0  # Reset iteration count for new refinement cycle
+                }
+            
+            elif approval in ['feedback', 'f']:
+                print("\n💬 Please provide specific feedback for improvement:")
+                human_feedback = input("Your feedback: ").strip()
+                if human_feedback:
+                    print(f"📝 Human feedback recorded: {human_feedback}")
+                    print("🔄 Returning to critique & refine loop with human feedback...")
+                    return {
+                        **state,
+                        "human_approved": False,
+                        "approval_attempts": approval_attempts + 1,
+                        "critiques": [f"Human feedback: {human_feedback}"],
+                        "iteration_count": 0  # Reset iteration count for new refinement cycle
+                    }
+                else:
+                    print("❌ No feedback provided. Please try again.")
+            
+            else:
+                print("❌ Invalid input. Please enter 'y' for yes, 'n' for no, or 'feedback' for specific feedback.")
+                
+        except KeyboardInterrupt:
+            print("\n⚠️ Human approval interrupted. Treating as rejection.")
+            return {
+                **state,
+                "human_approved": False,
+                "approval_attempts": approval_attempts + 1,
+                "critiques": ["Human approval process was interrupted."],
+                "iteration_count": 0
+            }
+        except Exception as e:
+            print(f"❌ Error during human approval: {e}")
+            print("Treating as rejection and continuing...")
+            return {
+                **state,
+                "human_approved": False,
+                "approval_attempts": approval_attempts + 1,
+                "critiques": ["Error occurred during human approval process."],
+                "iteration_count": 0
+            }
+
+def should_continue(state: AgentState) -> Literal["human_approval", "copywriting", "END"]:
+    """
+    Conditional edge function that determines the next step in the workflow.
+    
+    Args:
+        state: Current agent state with critiques and iteration count
+        
+    Returns:
+        "human_approval" if no critiques and ready for human review
+        "copywriting" if refinement needed
+        "END" if human approved or max attempts reached
     """
     critiques = state.get("critiques", [])
     iteration_count = state.get("iteration_count", 0)
     max_iterations = state.get("max_iterations", 3)
+    human_approved = state.get("human_approved", False)
+    approval_attempts = state.get("approval_attempts", 0)
     
-    # Check if we should continue refining
-    if not critiques:
-        print("🎉 No critiques found - post is ready!")
+    # If human has already approved, end the process
+    if human_approved:
+        print("🎉 Human approved - process complete!")
         return "END"
-    elif iteration_count >= max_iterations:
-        print(f"⚠️ Maximum iterations ({max_iterations}) reached - finishing with current draft")
-        return "END"
-    else:
+    
+    # If no critiques from critic_node, proceed to human approval
+    if not critiques and iteration_count > 0:
+        print("✅ No AI critiques found - proceeding to human approval")
+        return "human_approval"
+    
+    # If there are critiques and we haven't reached max iterations, continue refining
+    elif critiques and iteration_count < max_iterations:
         print(f"🔄 Critiques found - continuing to refinement (iteration {iteration_count + 1})")
         return "copywriting"
+    
+    # If we've reached max iterations, still go to human approval for final decision
+    elif iteration_count >= max_iterations:
+        print(f"⚠️ Maximum iterations ({max_iterations}) reached - proceeding to human approval")
+        return "human_approval"
+    
+    # Default fallback
+    else:
+        return "human_approval"
 
 def create_marketing_agent():
     """
-    Creates and compiles the marketing agent StateGraph with critique & refine loop.
-    
-    The agent follows this flow:
-    START → research → copywriting → critic → [continue/end decision]
-              ↑                                    ↓
-              └─────────← (if critiques exist) ───┘
+    Creates and compiles the marketing agent StateGraph with critique & refine loop and human approval.
     
     Returns:
         Compiled LangGraph agent ready for execution
@@ -358,6 +478,7 @@ def create_marketing_agent():
     workflow.add_node("research", research_node)
     workflow.add_node("copywriting", copywriting_node)
     workflow.add_node("critic", critic_node)
+    workflow.add_node("human_approval", human_approval_node)
     
     # Define the flow
     workflow.add_edge(START, "research")
@@ -369,8 +490,19 @@ def create_marketing_agent():
         "critic",
         should_continue,
         {
-            "copywriting": "copywriting",  # Loop back for refinement
-            "END": END                     # Finish if no critiques
+            "copywriting": "copywriting",        # Loop back for refinement
+            "human_approval": "human_approval",  # Proceed to human review
+            "END": END                           # Finis if approved
+        }
+    )
+    
+    # Add conditional edge from human approval
+    workflow.add_conditional_edges(
+        "human_approval",
+        lambda state: "END" if state.get("human_approved", False) else "copywriting",
+        {
+            "copywriting": "copywriting",  # Loop back if rejected
+            "END": END                    # Finish if approved
         }
     )
     
@@ -379,20 +511,167 @@ def create_marketing_agent():
     
     return app
 
+def generate_markdown_report(state: Dict[str, Any], filename: str = None) -> str:
+    """
+    Generates a comprehensive markdown report of the marketing agent process and results.
+    
+    Args:
+        state: Final state from the marketing agent
+        filename: Optional filename for the report (auto-generated if not provided)
+        
+    Returns:
+        Path to the generated markdown file
+    """
+    if filename is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"marketing_report_{timestamp}.md"
+    
+    # Get the current directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    filepath = os.path.join(current_dir, filename)
+    
+    research = state.get("research_findings", {})
+    draft_post = state.get("draft_post", "")
+    initial_request = state.get("initial_request", "")
+    iteration_count = state.get("iteration_count", 0)
+    critiques = state.get("critiques", [])
+    human_approved = state.get("human_approved", False)
+    approval_attempts = state.get("approval_attempts", 0)
+    
+    # Generate the markdown content
+    markdown_content = f"""# Marketing Agent Report
+
+## 📋 Executive Summary
+
+**Generated on**: {datetime.now().strftime("%B %d, %Y at %I:%M %p")}
+**Initial Request**: {initial_request}
+**Process Status**: {"✅ Approved" if human_approved else "⏸️ Incomplete"}
+**Total Refinement Iterations**: {iteration_count}
+**Human Approval Attempts**: {approval_attempts}
+
+---
+
+## 🔬 Research Findings
+
+### Topic Analysis
+**Subject**: {research.get('topic', 'Not specified')}
+
+### Key Insights
+{chr(10).join('- ' + point for point in research.get('key_points', ['No key points available']))}
+
+### Target Audience Profile
+- **Age Range**: {research.get('audience_demographics', {}).get('age_range', 'Not specified')}
+- **Primary Platforms**: {', '.join(research.get('audience_demographics', {}).get('platforms', ['Not specified']))}
+- **Interests**: {', '.join(research.get('audience_demographics', {}).get('interests', ['Not specified']))}
+
+### Competitor Insights
+{chr(10).join('- ' + insight for insight in research.get('competitor_insights', ['No competitor insights available']))}
+
+### Trending Hashtags
+{', '.join(research.get('trending_hashtags', ['No hashtags identified']))}
+
+### Success Criteria
+{chr(10).join('- ' + criterion for criterion in research.get('success_criteria', ['No success criteria specified']))}
+
+---
+
+## ✍️ Final Marketing Post
+
+```
+{draft_post if draft_post else "No content generated"}
+```
+
+### Content Statistics
+- **Character Count**: {len(draft_post)}
+- **Word Count**: {len(draft_post.split())}
+- **Estimated Reading Time**: {max(1, len(draft_post.split()) // 200)} minute(s)
+
+---
+
+## 🔄 Refinement Process
+
+### Iteration Summary
+- **Total Iterations**: {iteration_count}
+- **Final Status**: {"Ready for publication" if human_approved else "Requires further refinement"}
+
+### Final Critiques
+{chr(10).join('- ' + critique for critique in critiques) if critiques else "No outstanding critiques"}
+
+---
+
+## 👤 Human Review Process
+
+### Approval Status
+**Status**: {"✅ Approved by human reviewer" if human_approved else "❌ Pending human approval"}
+**Review Attempts**: {approval_attempts}
+
+---
+
+## 📊 Process Metrics
+
+| Metric | Value |
+|--------|-------|
+| Research Points Identified | {len(research.get('key_points', []))} |
+| Competitor Insights Found | {len(research.get('competitor_insights', []))} |
+| Trending Hashtags Identified | {len(research.get('trending_hashtags', []))} |
+| Success Criteria Defined | {len(research.get('success_criteria', []))} |
+| Refinement Iterations | {iteration_count} |
+| Outstanding Critiques | {len(critiques)} |
+| Human Approval Status | {"Approved" if human_approved else "Pending"} |
+
+---
+
+## 🚀 Next Steps
+
+{"""✅ **Content Ready for Publication**
+- The marketing post has been approved by human reviewer
+- Content meets all quality standards
+- Ready for deployment across target platforms""" if human_approved else """⏸️ **Action Required**
+- Human approval still needed
+- Consider addressing any outstanding critiques
+- Review content against success criteria"""}
+
+---
+
+## 🔧 Technical Details
+
+**Agent Configuration**:
+- Max Iterations: {state.get('max_iterations', 'Not specified')}
+- AI Model: GPT-4o
+- Temperature Settings: Creative (0.7) / Analytical (0.3)
+
+**Generated by**: LangGraph Marketing Agent
+"""
+
+    # Write the markdown file
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(markdown_content)
+        
+        print(f"📄 Marketing report generated: {filename}")
+        print(f"📁 File location: {filepath}")
+        
+        return filepath
+        
+    except Exception as e:
+        print(f"❌ Error generating markdown report: {e}")
+        return None
+
 def run_marketing_agent(request: str, max_iterations: int = 3) -> Dict[str, Any]:
     """
-    Runs the marketing agent with critique & refine loop.
+    Runs the marketing agent with critique & refine loop and human approval.
     
     Args:
         request: The initial marketing request from the user
         max_iterations: Maximum number of refinement iterations (default: 3)
         
     Returns:
-        Dictionary containing the final state with research, critiques, and final post
+        Dictionary containing the final state with research, critiques, approval status, and final post
     """
-    print(f"🚀 Starting marketing agent with critique & refine loop")
+    print(f"🚀 Starting marketing agent with critique & refine loop + human approval")
     print(f"📝 Request: '{request}'")
-    print(f"🔄 Max iterations: {max_iterations}\n")
+    print(f"🔄 Max iterations: {max_iterations}")
+    print(f"👤 Human approval: Required\n")
     
     # Create the agent
     agent = create_marketing_agent()
@@ -405,11 +684,19 @@ def run_marketing_agent(request: str, max_iterations: int = 3) -> Dict[str, Any]
         "critiques": [],
         "iteration_count": 0,
         "max_iterations": max_iterations,
+        "human_approved": False,
+        "approval_attempts": 0,
         "messages": [HumanMessage(content=request)]
     }
     
     # Run the agent
     final_state = agent.invoke(initial_state)
+    
+    # Generate markdown report automatically
+    print("\n📄 Generating comprehensive report...")
+    report_path = generate_markdown_report(final_state)
+    if report_path:
+        final_state["report_path"] = report_path
     
     return final_state
 
@@ -417,9 +704,9 @@ def main():
     """
     Main function demonstrating the marketing agent with critique & refine loop.
     """
-    print("=" * 70)
-    print("🎯 LANGGRAPH MARKETING AGENT - TASK 2: CRITIQUE & REFINE LOOP")
-    print("=" * 70)
+    print("=" * 80)
+    print("🎯 LANGGRAPH MARKETING AGENT")
+    print("=" * 80)
     print()
     
     # Example marketing requests
@@ -483,7 +770,8 @@ def main():
             print("❌ Please enter a number between 1 and 5")
     
     print(f"⚙️ Using {max_iterations} max iterations")
-    print("\n" + "=" * 70)
+    print("👤 Human approval will be required for final review")
+    print("\n" + "=" * 80)
     
     try:
         # Run the agent
@@ -516,8 +804,18 @@ def main():
         print("-" * 30)
         print(result["draft_post"])
         
+        # Show report information
+        if "report_path" in result:
+            print(f"\n📄 COMPREHENSIVE REPORT:")
+            print("-" * 30)
+            print(f"Report generated: {os.path.basename(result['report_path'])}")
+            print(f"Location: {result['report_path']}")
+            print("This report contains detailed analysis, metrics, and the complete process history.")
+        
         print("\n" + "=" * 70)
         print("✅ Marketing agent with critique & refine loop completed!")
+        if "report_path" in result:
+            print(f"📄 Comprehensive report saved as: {os.path.basename(result['report_path'])}")
         print("=" * 70)
         
     except Exception as e:
