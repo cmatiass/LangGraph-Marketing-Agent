@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import { Play, RefreshCw, Copy, Download, MessageSquare } from 'lucide-react';
+import { Play, RefreshCw, Copy, Download } from 'lucide-react';
 
 interface LogEntry {
   type: string;
@@ -94,6 +94,7 @@ const MarketingAgent: React.FC = () => {
         websocket.close();
       }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -369,10 +370,6 @@ const MarketingAgent: React.FC = () => {
       case 'error': return '❌';
       default: return '⚪';
     }
-  };
-
-  const formatTimestamp = (timestamp: string) => {
-    return new Date(timestamp).toLocaleTimeString();
   };
 
   return (
