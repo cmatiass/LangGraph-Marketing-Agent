@@ -452,7 +452,13 @@ app.add_middleware(
 # Mount static files for React frontend
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.exists(static_dir):
-    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+    # Mount the React static files (CSS, JS, etc.)
+    react_static_dir = os.path.join(static_dir, "static")
+    if os.path.exists(react_static_dir):
+        app.mount("/static", StaticFiles(directory=react_static_dir), name="react_static")
+    
+    # Also mount the root static directory for other files (favicon, manifest, etc.)
+    app.mount("/assets", StaticFiles(directory=static_dir), name="assets")
 
 class WebSocketManager:
     def __init__(self):
@@ -662,7 +668,14 @@ async def run_marketing_agent_async(request: str, max_iterations: int, client_id
 
 @app.get("/")
 async def root():
-    return {"message": "LangGraph Marketing Agent API", "status": "running"}
+    """Serve the React frontend index.html"""
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    index_file = os.path.join(static_dir, "index.html")
+    
+    if os.path.isfile(index_file):
+        return FileResponse(index_file)
+    else:
+        return {"message": "Frontend not built. Please build the React app first.", "status": "running"}
 
 @app.get("/health")
 async def health_check():
