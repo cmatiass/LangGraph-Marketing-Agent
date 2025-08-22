@@ -642,7 +642,7 @@ const MarketingAgent: React.FC = () => {
       {/* Footer */}
       <footer className="agent-footer">
         <div className="footer-content">
-          <p>Desarrollado con ❤️ por Carlos Matías Sáez</p>
+          <p>Developed with ❤️ by Carlos Matías Sáez</p>
           <div className="social-links">
             <a 
               href="https://github.com/cmatiass" 
