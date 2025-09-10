@@ -226,14 +226,6 @@ python main.py
 
 - 🔗 **GitHub**: [@cmatiass](https://github.com/cmatiass)
 - 💼 **LinkedIn**: [Carlos Matías Sáez](https://www.linkedin.com/in/carlosmatiassaez/)
-- 📧 **Email**: [your email here]
+- 📧 **Email**: f72masac@gmail.com
 
 ---
-
-<div align="center">
-
-**⭐ If you like this project, give it a star ⭐**
-
-**Made with ❤️ by [Carlos Matías Sáez](https://github.com/cmatiass)**
-
-</div>
